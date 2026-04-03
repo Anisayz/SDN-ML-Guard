@@ -15,10 +15,12 @@ import json
 import logging
 import os
 import pickle
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import joblib
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -284,19 +286,16 @@ class MLEngine:
         return label, confidence, proba_dict
 
     @staticmethod
+
+
     def _load_pkl(path: Path, name: str):
         if not path.exists():
-            raise FileNotFoundError(
-                f"MLEngine: {name} not found at {path}. "
-                "Run preprocess.py + train.py first."
-            )
-        with open(path, "rb") as f:
-            obj = pickle.load(f)
+            raise FileNotFoundError(f"{name} not found at {path}. Run train.py first.")
+
+        obj = joblib.load(path)  # handles compressed sklearn models
         size_mb = path.stat().st_size / 1e6
         log.info(f"  Loaded {name:20s} ← {path.name}  ({size_mb:.1f} MB)")
         return obj
-
-
 # ---------------------------------------------------------------------------
 # Module-level singleton — used by capture.py and api.py
 # ---------------------------------------------------------------------------
