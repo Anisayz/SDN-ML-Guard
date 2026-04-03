@@ -1,0 +1,24 @@
+{
+  "train_rows": 2998588,
+  "test_rows": 749647,
+  "benign_train_rows": 800000,
+  "n_features": 72,
+  "n_classes": 15,
+  "classes": [
+    "Benign",
+    "Bot",
+    "Brute Force -Web",
+    "Brute Force -XSS",
+    "DDOS attack-HOIC",
+    "DDOS attack-LOIC-UDP",
+    "DDoS attacks-LOIC-HTTP",
+    "DoS attacks-GoldenEye",
+    "DoS attacks-Hulk",
+    "DoS attacks-SlowHTTPTest",
+    "DoS attacks-Slowloris",
+    "FTP-BruteForce",
+    "Infilteration",
+    "SQL Injection",
+    "SSH-Bruteforce"
+  ]
+}

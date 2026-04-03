@@ -1,0 +1,181 @@
+{
+  "classifier": {
+    "accuracy": 0.9,
+    "weighted_f1": 0.9062,
+    "macro_f1": 0.841,
+    "weak_classes": {
+      "Brute Force -Web": 0.6488,
+      "DoS attacks-SlowHTTPTest": 0.6993,
+      "FTP-BruteForce": 0.5652,
+      "Infilteration": 0.4738,
+      "SQL Injection": 0.6207
+    },
+    "per_class_f1": {
+      "Benign": 0.861,
+      "Bot": 0.9992,
+      "Brute Force -Web": 0.6488,
+      "Brute Force -XSS": 0.8791,
+      "DDOS attack-HOIC": 0.9998,
+      "DDOS attack-LOIC-UDP": 0.8704,
+      "DDoS attacks-LOIC-HTTP": 0.9994,
+      "DoS attacks-GoldenEye": 0.9996,
+      "DoS attacks-Hulk": 1.0,
+      "DoS attacks-SlowHTTPTest": 0.6993,
+      "DoS attacks-Slowloris": 0.9984,
+      "FTP-BruteForce": 0.5652,
+      "Infilteration": 0.4738,
+      "SQL Injection": 0.6207,
+      "SSH-Bruteforce": 0.9999
+    }
+  },
+  "anomaly": {
+    "roc_auc": 0.8535,
+    "pr_auc": 0.9089,
+    "active_threshold": 0.010639,
+    "optimal_threshold": 0.010639,
+    "current_f1": 0.8804,
+    "current_precision": 0.9052,
+    "current_recall": 0.857,
+    "optimal_f1": 0.8804,
+    "attack_detection": {
+      "Bot": {
+        "total": 57238,
+        "caught": 28437,
+        "rate": 0.4968
+      },
+      "Brute Force -Web": {
+        "total": 122,
+        "caught": 89,
+        "rate": 0.7295
+      },
+      "Brute Force -XSS": {
+        "total": 46,
+        "caught": 26,
+        "rate": 0.5652
+      },
+      "DDOS attack-HOIC": {
+        "total": 137202,
+        "caught": 137202,
+        "rate": 1.0
+      },
+      "DDOS attack-LOIC-UDP": {
+        "total": 346,
+        "caught": 346,
+        "rate": 1.0
+      },
+      "DDoS attacks-LOIC-HTTP": {
+        "total": 115238,
+        "caught": 84817,
+        "rate": 0.736
+      },
+      "DoS attacks-GoldenEye": {
+        "total": 8302,
+        "caught": 8302,
+        "rate": 1.0
+      },
+      "DoS attacks-Hulk": {
+        "total": 92383,
+        "caught": 92383,
+        "rate": 1.0
+      },
+      "DoS attacks-SlowHTTPTest": {
+        "total": 27978,
+        "caught": 27978,
+        "rate": 1.0
+      },
+      "DoS attacks-Slowloris": {
+        "total": 2198,
+        "caught": 2198,
+        "rate": 1.0
+      },
+      "FTP-BruteForce": {
+        "total": 38672,
+        "caught": 38672,
+        "rate": 1.0
+      },
+      "Infilteration": {
+        "total": 32387,
+        "caught": 13066,
+        "rate": 0.4034
+      },
+      "SQL Injection": {
+        "total": 17,
+        "caught": 15,
+        "rate": 0.8824
+      },
+      "SSH-Bruteforce": {
+        "total": 37518,
+        "caught": 37518,
+        "rate": 1.0
+      }
+    },
+    "benign_total": 200000,
+    "benign_correct": 150657,
+    "benign_flagged": 49343,
+    "benign_fpr": 0.2467,
+    "benign_accuracy": 0.7533
+  },
+  "cross_model": {
+    "total_attacks": 549647,
+    "rf_missed": 9480,
+    "ae_caught_rf_misses": 2539,
+    "per_class": {
+      "Bot": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      },
+      "Brute Force -Web": {
+        "rf_missed": 12,
+        "ae_saved": 3
+      },
+      "Brute Force -XSS": {
+        "rf_missed": 4,
+        "ae_saved": 0
+      },
+      "DDOS attack-HOIC": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      },
+      "DDOS attack-LOIC-UDP": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      },
+      "DDoS attacks-LOIC-HTTP": {
+        "rf_missed": 11,
+        "ae_saved": 0
+      },
+      "DoS attacks-GoldenEye": {
+        "rf_missed": 1,
+        "ae_saved": 1
+      },
+      "DoS attacks-Hulk": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      },
+      "DoS attacks-SlowHTTPTest": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      },
+      "DoS attacks-Slowloris": {
+        "rf_missed": 1,
+        "ae_saved": 1
+      },
+      "FTP-BruteForce": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      },
+      "Infilteration": {
+        "rf_missed": 9448,
+        "ae_saved": 2533
+      },
+      "SQL Injection": {
+        "rf_missed": 3,
+        "ae_saved": 1
+      },
+      "SSH-Bruteforce": {
+        "rf_missed": 0,
+        "ae_saved": 0
+      }
+    }
+  }
+}
