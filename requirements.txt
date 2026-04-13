@@ -1,0 +1,16 @@
+uvicorn~=0.42.0
+fastapi~=0.135.3
+pydantic~=2.12.5
+requests~=2.33.1
+urllib3~=2.6.3
+numpy~=2.4.4
+pandas~=3.0.2
+torch~=2.11.0
+imblearn~=0.0
+imbalanced-learn~=0.14.1
+scikit-learn~=1.8.0
+dotenv~=0.9.9
+python-dotenv~=1.2.2
+joblib~=1.5.3
+matplotlib~=3.10.8
+seaborn~=0.13.2

@@ -12,6 +12,8 @@ Endpoints:
     GET  /info             — model metadata
     GET  /docs             — auto-generated Swagger UI (FastAPI built-in)
 
+
+    
 The engine loads all models on first request (lazy load) or eagerly on
 startup via the lifespan event. Both RF and AE run on every flow.
 

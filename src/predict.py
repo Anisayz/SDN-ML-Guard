@@ -270,11 +270,12 @@ class MLEngine:
     # Internal helpers
     # ------------------------------------------------------------------
     def _build_vector(self, flow: dict) -> np.ndarray:
-        vec = np.array(
-            [float(flow.get(feat, 0.0)) for feat in self.feature_list],
-            dtype=np.float32,
-        ).reshape(1, -1)
-        return np.nan_to_num(vec, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        data = [float(flow.get(feat, 0.0)) for feat in self.feature_list]
+
+        df = pd.DataFrame([data], columns=self.feature_list)
+
+        return df.fillna(0.0).replace([np.inf, -np.inf], 0.0)
 
     def _run_classifier(self, rf_vector: np.ndarray) -> tuple[str, float, dict]:
         cls_id     = int(self.clf.predict(rf_vector)[0])
