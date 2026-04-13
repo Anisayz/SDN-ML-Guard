@@ -14,8 +14,6 @@ Called by:
 import json
 import logging
 import os
-import pickle
-import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -27,7 +25,7 @@ import numpy as np
 # Logging
 # ---------------------------------------------------------------------------
 log = logging.getLogger(__name__)
-
+DEBUG = True
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -40,7 +38,7 @@ DATA_DIR   = BASE_DIR / "data"
 # ---------------------------------------------------------------------------
 
 # AE_THRESHOLD: reconstruction error above this → AE flags as anomalous.
-# Derived from evaluate.py optimal F1 threshold sweep.
+# Derived from evaluate.py optimal F1predict() threshold sweep.
 AE_THRESHOLD = float(os.getenv("AE_THRESHOLD", "0.003863"))
 
 # RF_CONF_MIN: minimum RF confidence to treat RF label as reliable.
@@ -155,13 +153,19 @@ class MLEngine:
 
         # 1. Build raw feature vector once
         raw_vector = self._build_vector(flow)             # (1, 72)
-
+        if DEBUG:
+            print("[DEBUG] BEFORE RF scaler:", type(raw_vector))
         # 2. RF inference
         rf_vector                          = self.scaler.transform(raw_vector)
+        if DEBUG:
+            print("[DEBUG] AFTER RF scaler:", type(rf_vector))
         rf_label, rf_confidence, rf_proba  = self._run_classifier(rf_vector)
         rf_is_attack                       = (rf_label != BENIGN_LABEL)
 
         # 3. AE inference
+        if DEBUG:
+            print("[DEBUG] BEFORE AE scaler:", type(raw_vector))
+ 
         ae_vector       = self.benign_scaler.transform(raw_vector)
         neg_score       = float(self.ae_wrapper.score_samples(ae_vector)[0])
         anomaly_score   = -neg_score                      # positive reconstruction error
@@ -192,8 +196,14 @@ class MLEngine:
 
         if not flows:              #guard against empty input
             return []
-        
-        raw_matrix = np.vstack([self._build_vector(f) for f in flows])  # (n, 72)
+        raw_matrix = pd.concat(
+            [self._build_vector(f) for f in flows],
+            ignore_index=True
+        )
+
+        if DEBUG:
+            print("[DEBUG] BATCH raw_matrix type:", type(raw_matrix))
+            print("[DEBUG] BATCH shape:", raw_matrix.shape) # (n, 72)
 
         # RF — full batch
         rf_matrix  = self.scaler.transform(raw_matrix)
@@ -269,13 +279,17 @@ class MLEngine:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _build_vector(self, flow: dict) -> np.ndarray:
-        
-        data = [float(flow.get(feat, 0.0)) for feat in self.feature_list]
+    def _build_vector(self, flow: dict):
+   
 
-        df = pd.DataFrame([data], columns=self.feature_list)
+        row = {feat: float(flow.get(feat, 0.0)) for feat in self.feature_list}
+        df = pd.DataFrame([row], columns=self.feature_list)
 
-        return df.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+        if DEBUG:
+            print("[DEBUG] _build_vector type:", type(df))
+            print("[DEBUG] columns match:", list(df.columns) == self.feature_list)
+
+        return df.replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
     def _run_classifier(self, rf_vector: np.ndarray) -> tuple[str, float, dict]:
         cls_id     = int(self.clf.predict(rf_vector)[0])
