@@ -235,8 +235,7 @@ def _smoke_test() -> None:
     success = send_alert(test_verdict, test_meta)
     if success:
         log.info("Alert delivered ✓")
-    else: 
-        log.warning(
+    else:        log.warning(
             "Alert not delivered — this is expected if the Mitigation Engine "
             "is not running yet. Check MITIGATION_URL in .env"
         )
