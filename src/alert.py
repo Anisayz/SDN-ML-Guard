@@ -46,7 +46,7 @@ def _get_session() -> requests.Session:
     if _session is None:
         _session = requests.Session()
         retry = Retry(
-            total            = ALERT_RETRIES,
+            total            = Config.ALERT_RETRIES,
             backoff_factor   = 0.3,
             status_forcelist = [500, 502, 503, 504],
         )
@@ -183,14 +183,14 @@ def send_alert(
 
     except requests.exceptions.ConnectionError:
         log.error(
-            f"[alert] Cannot reach Mitigation Engine at {MITIGATION_URL} — "
+            f"[alert] Cannot reach Mitigation Engine at {Config.MITIGATION_URL} — "
             f"is it running? verdict={verdict} was NOT delivered."
         )
         return False
 
     except requests.exceptions.Timeout:
         log.error(
-            f"[alert] Mitigation Engine timed out after {ALERT_TIMEOUT_S}s — "
+            f"[alert] Mitigation Engine timed out after {Config.ALERT_TIMEOUT_S}s — "
             f"verdict={verdict} may not have been delivered."
         )
         return False
@@ -226,7 +226,7 @@ def _smoke_test() -> None:
         "end_time_ms"  : int(time.time() * 1000),
     }
 
-    log.info(f"Sending test alert to {MITIGATION_URL} ...")
+    log.info(f"Sending test alert to {Config.MITIGATION_URL} ...")
     log.info(f"Payload: {json.dumps(_build_payload(test_verdict, test_meta), indent=2)}")
     success = send_alert(test_verdict, test_meta)
     if success:

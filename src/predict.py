@@ -152,33 +152,33 @@ class MLEngine:
         if not self._loaded:
             self.load()
 
-        # 1. Build raw feature vector once
-        raw_vector = self._build_vector(flow)             # (1, 72) numpy array
+        # 1. Build raw feature vector as DataFrame (preserves feature names)
+        raw_df = self._build_vector(flow)
 
-        # 2. RF inference
-        rf_vector                          = self.scaler.transform(raw_vector)
-        rf_label, rf_confidence, rf_proba  = self._run_classifier(rf_vector)
-        rf_is_attack                       = (rf_label != BENIGN_LABEL)
+        # 2. RF inference - transform returns numpy array
+        rf_vector = self.scaler.transform(raw_df)  # numpy (1, 72)
+        rf_label, rf_confidence, rf_proba = self._run_classifier(rf_vector)
+        rf_is_attack = (rf_label != BENIGN_LABEL)
 
-        # 3. AE inference
-        ae_vector       = self.benign_scaler.transform(raw_vector)
-        neg_score       = float(self.ae_wrapper.score_samples(ae_vector)[0])
-        anomaly_score   = -neg_score                      # positive reconstruction error
+        # 3. AE inference - transform returns numpy array
+        ae_vector = self.benign_scaler.transform(raw_df)  # numpy (1, 72)
+        neg_score = float(self.ae_wrapper.score_samples(ae_vector)[0])
+        anomaly_score = -neg_score
         anomaly_flagged = anomaly_score > AE_THRESHOLD
 
         # 4. Fusion — AND logic
         verdict, source = self._fuse(rf_is_attack, rf_confidence, anomaly_flagged)
-        is_attack       = verdict in ("ATTACK", "SUSPECT")
+        is_attack = verdict in ("ATTACK", "SUSPECT")
 
         return Verdict(
-            label               = rf_label,
-            confidence          = rf_confidence,
-            is_attack           = is_attack,
-            anomaly_score       = anomaly_score,
-            anomaly_flagged     = anomaly_flagged,
-            verdict             = verdict,
-            source              = source,
-            class_probabilities = rf_proba,
+            label=rf_label,
+            confidence=rf_confidence,
+            is_attack=is_attack,
+            anomaly_score=anomaly_score,
+            anomaly_flagged=anomaly_flagged,
+            verdict=verdict,
+            source=source,
+            class_probabilities=rf_proba,
         )
 
     # ------------------------------------------------------------------
@@ -192,40 +192,40 @@ class MLEngine:
         if not flows:
             return []
 
-        # Build raw matrix from all flows
-        raw_matrix = np.vstack([self._build_vector(f) for f in flows])  # (n, 72)
+        # Build raw matrix from all flows as DataFrame
+        raw_df = pd.concat([self._build_vector(f) for f in flows], ignore_index=True)
 
-        # RF — full batch
-        rf_matrix  = self.scaler.transform(raw_matrix)
-        y_pred     = self.clf.predict(rf_matrix)
-        y_proba    = self.clf.predict_proba(rf_matrix)                   # (n, n_classes)
+        # RF — full batch (transform returns numpy)
+        rf_matrix = self.scaler.transform(raw_df)  # numpy (n, 72)
+        y_pred = self.clf.predict(rf_matrix)
+        y_proba = self.clf.predict_proba(rf_matrix)  # (n, n_classes)
 
-        # AE — full batch
-        ae_matrix    = self.benign_scaler.transform(raw_matrix)
-        neg_scores   = self.ae_wrapper.score_samples(ae_matrix)          # (n,)
-        ae_errors    = -neg_scores                                        # positive errors
-        ae_flagged   = ae_errors > AE_THRESHOLD
+        # AE — full batch (transform returns numpy)
+        ae_matrix = self.benign_scaler.transform(raw_df)  # numpy (n, 72)
+        neg_scores = self.ae_wrapper.score_samples(ae_matrix)  # (n,)
+        ae_errors = -neg_scores  # positive errors
+        ae_flagged = ae_errors > AE_THRESHOLD
 
         verdicts = []
         for i in range(len(flows)):
-            cls_id      = int(y_pred[i])
-            label       = self.le.classes_[cls_id]
-            confidence  = float(y_proba[i][cls_id])
-            proba_dict  = {self.le.classes_[j]: float(y_proba[i][j])
-                           for j in range(len(self.le.classes_))}
+            cls_id = int(y_pred[i])
+            label = self.le.classes_[cls_id]
+            confidence = float(y_proba[i][cls_id])
+            proba_dict = {self.le.classes_[j]: float(y_proba[i][j])
+                          for j in range(len(self.le.classes_))}
             rf_is_attack = (label != BENIGN_LABEL)
-            flagged      = bool(ae_flagged[i])
+            flagged = bool(ae_flagged[i])
 
             verdict, source = self._fuse(rf_is_attack, confidence, flagged)
             verdicts.append(Verdict(
-                label               = label,
-                confidence          = confidence,
-                is_attack           = verdict in ("ATTACK", "SUSPECT"),
-                anomaly_score       = float(ae_errors[i]),
-                anomaly_flagged     = flagged,
-                verdict             = verdict,
-                source              = source,
-                class_probabilities = proba_dict,
+                label=label,
+                confidence=confidence,
+                is_attack=verdict in ("ATTACK", "SUSPECT"),
+                anomaly_score=float(ae_errors[i]),
+                anomaly_flagged=flagged,
+                verdict=verdict,
+                source=source,
+                class_probabilities=proba_dict,
             ))
         return verdicts
 
@@ -267,24 +267,22 @@ class MLEngine:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _build_vector(self, flow: dict) -> np.ndarray:
+    def _build_vector(self, flow: dict) -> pd.DataFrame:
         """
-        Build feature vector from flow dict, handling missing/inf/nan values.
+        Build feature vector as DataFrame to preserve feature names for scaler.
         
-        Uses pandas DataFrame internally to ensure proper column ordering
-        and cleaning, then returns as numpy array.
+        The scaler was fitted with DataFrames, so it expects DataFrames as input.
+        It will transform and return a numpy array.
         """
         row = {feat: float(flow.get(feat, 0.0)) for feat in self.feature_list}
         df = pd.DataFrame([row], columns=self.feature_list)
-        
-        # Clean data and return as numpy array
-        return df.replace([np.inf, -np.inf], 0.0).fillna(0.0).values
+        return df.replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
     def _run_classifier(self, rf_vector: np.ndarray) -> tuple[str, float, dict]:
         """Run RandomForest classifier and return label, confidence, and probabilities."""
-        cls_id     = int(self.clf.predict(rf_vector)[0])
-        label      = self.le.classes_[cls_id]
-        proba      = self.clf.predict_proba(rf_vector)[0]
+        cls_id = int(self.clf.predict(rf_vector)[0])
+        label = self.le.classes_[cls_id]
+        proba = self.clf.predict_proba(rf_vector)[0]
         confidence = float(proba[cls_id])
         proba_dict = {self.le.classes_[i]: float(proba[i])
                       for i in range(len(self.le.classes_))}
@@ -344,14 +342,14 @@ def _smoke_test() -> None:
     test_path = DATA_DIR / "processed" / "test_raw.pkl"
     if test_path.exists():
         test_df = pd.read_pickle(test_path)
-        sample  = test_df.sample(n=min(10, len(test_df)), random_state=42)
+        sample = test_df.sample(n=min(10, len(test_df)), random_state=42)
         log.info(f"\nTest 2 — 10 real flows from test_raw.pkl:")
         log.info(f"  {'true label':35s}  {'pred label':35s}  "
                  f"{'conf':5s}  {'ae_flag':7s}  {'verdict':7s}  source")
         log.info("  " + "-" * 105)
         for _, row in sample.iterrows():
             true_label = row.get("Label", "unknown")
-            flow_dict  = {f: row[f] for f in engine.feature_list if f in row}
+            flow_dict = {f: row[f] for f in engine.feature_list if f in row}
             v = engine.predict(flow_dict)
             log.info(
                 f"  {true_label:35s}  {v.label:35s}  "
@@ -363,7 +361,7 @@ def _smoke_test() -> None:
         log.warning("  test_raw.pkl not found — skipping real-flow test")
 
     # Test 3 — batch predict
-    batch  = [{f: 0.0 for f in engine.feature_list} for _ in range(3)]
+    batch = [{f: 0.0 for f in engine.feature_list} for _ in range(3)]
     result = engine.predict_batch(batch)
     log.info(f"\nTest 3 — Batch predict (3 zero flows):")
     for i, v in enumerate(result):
