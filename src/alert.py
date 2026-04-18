@@ -161,9 +161,8 @@ def send_alert(
             timeout=Config.ALERT_TIMEOUT_S,
             headers={
                 "Content-Type": "application/json",
-                "X-API-Key": Config.MITIGATIN_API_KEY,    
-            },
-        )
+                "X-API-Key": Config.MITIGATION_API_KEY,
+            },        )
          
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
