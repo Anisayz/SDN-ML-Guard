@@ -17,15 +17,16 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-import pandas as pd
+
 import joblib
 import numpy as np
+import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 log = logging.getLogger(__name__)
-DEBUG = False
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -38,13 +39,13 @@ DATA_DIR   = BASE_DIR / "data"
 # ---------------------------------------------------------------------------
 
 # AE_THRESHOLD: reconstruction error above this → AE flags as anomalous.
-# Derived from evaluate.py optimal F1predict() threshold sweep.
+# Derived from evaluate.py optimal F1 threshold sweep.
 AE_THRESHOLD = float(os.getenv("AE_THRESHOLD", "0.003863"))
 
 # RF_CONF_MIN: minimum RF confidence to treat RF label as reliable.
 # Below this, RF label is still used but marked as low-confidence.
 RF_CONF_MIN = float(os.getenv("RF_CONF_MIN", "0.50"))
-RF_CONF_HIGH = float(os.getenv("RF_CONF_HIGH", "0.70"))  # NEW
+RF_CONF_HIGH = float(os.getenv("RF_CONF_HIGH", "0.70"))
 
 # BENIGN_LABEL: must match LabelEncoder class name exactly.
 BENIGN_LABEL = os.getenv("BENIGN_LABEL", "Benign")
@@ -108,6 +109,7 @@ class MLEngine:
         self.le            = None   # LabelEncoder
         self.feature_list: list[str] = []
         self.benign_class_id: int    = -1
+
     def load(self) -> None:
         """Load all artefacts from disk. Call once at startup."""
         if self._loaded:
@@ -115,15 +117,11 @@ class MLEngine:
 
         log.info("MLEngine: loading artefacts ...")
 
-        self.clf = self._load_pkl(MODELS_DIR / "classifier.pkl", "RandomForest")
-        self.ae_wrapper = self._load_pkl(MODELS_DIR / "anomaly.pkl", "AutoencoderWrapper")
-        self.scaler = self._load_pkl(MODELS_DIR / "scaler.pkl", "scaler")
-        self.benign_scaler = self._load_pkl(MODELS_DIR / "benign_scaler.pkl", "benign_scaler")
-        self.le = self._load_pkl(MODELS_DIR / "label_encoder.pkl", "LabelEncoder")
-
-         
-        self.scaler.set_output(transform="pandas")
-        self.benign_scaler.set_output(transform="pandas")
+        self.clf           = self._load_pkl(MODELS_DIR / "classifier.pkl",       "RandomForest")
+        self.ae_wrapper    = self._load_pkl(MODELS_DIR / "anomaly.pkl",          "AutoencoderWrapper")
+        self.scaler        = self._load_pkl(MODELS_DIR / "scaler.pkl",           "scaler")
+        self.benign_scaler = self._load_pkl(MODELS_DIR / "benign_scaler.pkl",    "benign_scaler")
+        self.le            = self._load_pkl(MODELS_DIR / "label_encoder.pkl",    "LabelEncoder")
 
         self.benign_class_id = list(self.le.classes_).index(BENIGN_LABEL)
 
@@ -136,6 +134,7 @@ class MLEngine:
             f"AE_THRESHOLD={AE_THRESHOLD}"
         )
         self._loaded = True
+
     # ------------------------------------------------------------------
     # Core inference — single flow
     # ------------------------------------------------------------------
@@ -154,31 +153,15 @@ class MLEngine:
             self.load()
 
         # 1. Build raw feature vector once
-        raw_vector = self._build_vector(flow)             # (1, 72)
-        if DEBUG:
-            print("[DEBUG] BEFORE RF scaler:", type(raw_vector))
-        # 2. RF inference
-        rf_array = self.scaler.transform(raw_vector)
+        raw_vector = self._build_vector(flow)             # (1, 72) numpy array
 
-        rf_vector = pd.DataFrame(
-            rf_array,
-            columns=self.feature_list
-        )
-        if DEBUG:
-            print("[DEBUG] AFTER RF scaler:", type(rf_vector))
+        # 2. RF inference
+        rf_vector                          = self.scaler.transform(raw_vector)
         rf_label, rf_confidence, rf_proba  = self._run_classifier(rf_vector)
         rf_is_attack                       = (rf_label != BENIGN_LABEL)
 
         # 3. AE inference
-        if DEBUG:
-            print("[DEBUG] BEFORE AE scaler:", type(raw_vector))
- 
-        ae_array = self.benign_scaler.transform(raw_vector)
-
-        ae_vector = pd.DataFrame(
-            ae_array,
-            columns=self.feature_list
-        )
+        ae_vector       = self.benign_scaler.transform(raw_vector)
         neg_score       = float(self.ae_wrapper.score_samples(ae_vector)[0])
         anomaly_score   = -neg_score                      # positive reconstruction error
         anomaly_flagged = anomaly_score > AE_THRESHOLD
@@ -206,26 +189,19 @@ class MLEngine:
         if not self._loaded:
             self.load()
 
-        if not flows:              #guard against empty input
+        if not flows:
             return []
-        raw_matrix = pd.concat(
-            [self._build_vector(f) for f in flows],
-            ignore_index=True
-        )
 
-        if DEBUG:
-            print("[DEBUG] BATCH raw_matrix type:", type(raw_matrix))
-            print("[DEBUG] BATCH shape:", raw_matrix.shape) # (n, 72)
+        # Build raw matrix from all flows
+        raw_matrix = np.vstack([self._build_vector(f) for f in flows])  # (n, 72)
 
         # RF — full batch
-        rf_array = self.scaler.transform(raw_matrix)
-        rf_matrix = pd.DataFrame(rf_array, columns=self.feature_list)
+        rf_matrix  = self.scaler.transform(raw_matrix)
         y_pred     = self.clf.predict(rf_matrix)
         y_proba    = self.clf.predict_proba(rf_matrix)                   # (n, n_classes)
 
         # AE — full batch
-        ae_array = self.benign_scaler.transform(raw_matrix)
-        ae_matrix = pd.DataFrame(ae_array, columns=self.feature_list)
+        ae_matrix    = self.benign_scaler.transform(raw_matrix)
         neg_scores   = self.ae_wrapper.score_samples(ae_matrix)          # (n,)
         ae_errors    = -neg_scores                                        # positive errors
         ae_flagged   = ae_errors > AE_THRESHOLD
@@ -265,16 +241,16 @@ class MLEngine:
         """
         Confidence-aware fusion — returns (verdict, source).
 
-     ┌──────────────┬──────────┬─────────────┬───────────┬──────────┐
-     │ RF attack?   │ RF conf  │ AE flagged? │ Verdict   │ Source   │
-     ├──────────────┼──────────┼─────────────┼───────────┼──────────┤
-     │ Yes          │ ≥ 0.70   │ any         │ ATTACK    │ RF       │
-     │ Yes          │ < 0.70   │ Yes         │ ATTACK    │ RF+AE    │
-     │ Yes          │ < 0.70   │ No          │ SUSPECT   │ RF       │
-     │ No           │ any      │ Yes         │ ANOMALY   │ AE       │
-     │ No           │ any      │ No          │ BENIGN    │ RF+AE    │
-     └──────────────┴──────────┴─────────────┴───────────┴──────────┘
-      """
+        ┌──────────────┬──────────┬─────────────┬───────────┬──────────┐
+        │ RF attack?   │ RF conf  │ AE flagged? │ Verdict   │ Source   │
+        ├──────────────┼──────────┼─────────────┼───────────┼──────────┤
+        │ Yes          │ ≥ 0.70   │ any         │ ATTACK    │ RF       │
+        │ Yes          │ < 0.70   │ Yes         │ ATTACK    │ RF+AE    │
+        │ Yes          │ < 0.70   │ No          │ SUSPECT   │ RF       │
+        │ No           │ any      │ Yes         │ ANOMALY   │ AE       │
+        │ No           │ any      │ No          │ BENIGN    │ RF+AE    │
+        └──────────────┴──────────┴─────────────┴───────────┴──────────┘
+        """
         if rf_is_attack:
             if rf_confidence >= RF_CONF_HIGH:
                 return "ATTACK", "RF"
@@ -286,26 +262,26 @@ class MLEngine:
             if ae_flagged:
                 return "ANOMALY", "AE"
             else:
-                return "BENIGN", "RF+AE"   
-            
-        
+                return "BENIGN", "RF+AE"
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _build_vector(self, flow: dict):
-   
-
+    def _build_vector(self, flow: dict) -> np.ndarray:
+        """
+        Build feature vector from flow dict, handling missing/inf/nan values.
+        
+        Uses pandas DataFrame internally to ensure proper column ordering
+        and cleaning, then returns as numpy array.
+        """
         row = {feat: float(flow.get(feat, 0.0)) for feat in self.feature_list}
         df = pd.DataFrame([row], columns=self.feature_list)
-
-        if DEBUG:
-            print("[DEBUG] _build_vector type:", type(df))
-            print("[DEBUG] columns match:", list(df.columns) == self.feature_list)
-
-        return df.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+        
+        # Clean data and return as numpy array
+        return df.replace([np.inf, -np.inf], 0.0).fillna(0.0).values
 
     def _run_classifier(self, rf_vector: np.ndarray) -> tuple[str, float, dict]:
+        """Run RandomForest classifier and return label, confidence, and probabilities."""
         cls_id     = int(self.clf.predict(rf_vector)[0])
         label      = self.le.classes_[cls_id]
         proba      = self.clf.predict_proba(rf_vector)[0]
@@ -315,9 +291,8 @@ class MLEngine:
         return label, confidence, proba_dict
 
     @staticmethod
-
-
     def _load_pkl(path: Path, name: str):
+        """Load a pickled model from disk."""
         if not path.exists():
             raise FileNotFoundError(f"{name} not found at {path}. Run train.py first.")
 
@@ -325,10 +300,13 @@ class MLEngine:
         size_mb = path.stat().st_size / 1e6
         log.info(f"  Loaded {name:20s} ← {path.name}  ({size_mb:.1f} MB)")
         return obj
+
+
 # ---------------------------------------------------------------------------
 # Module-level singleton — used by capture.py and api.py
 # ---------------------------------------------------------------------------
 _engine: Optional[MLEngine] = None
+
 
 def get_engine() -> MLEngine:
     """Return the shared MLEngine instance, loading on first call."""
@@ -363,7 +341,6 @@ def _smoke_test() -> None:
              f"ae_flagged={v.anomaly_flagged}  source={v.source}")
 
     # Test 2 — real flows from test_raw.pkl
-    import pandas as pd
     test_path = DATA_DIR / "processed" / "test_raw.pkl"
     if test_path.exists():
         test_df = pd.read_pickle(test_path)
@@ -394,12 +371,14 @@ def _smoke_test() -> None:
                  f"ae_score={v.anomaly_score:.6f}")
 
     # Test 4 — fusion logic explanation
-    log.info(f"\nTest 4 — Fusion logic (simultaneous AND):")
-    log.info(f"  RF attack  + AE flags   → ATTACK  (block)")
-    log.info(f"  RF attack  + AE passes  → SUSPECT (alert only)")
-    log.info(f"  RF benign  + AE flags   → ANOMALY (alert + rate limit)")
-    log.info(f"  RF benign  + AE passes  → BENIGN  (pass through)")
+    log.info(f"\nTest 4 — Fusion logic (confidence-aware AND):")
+    log.info(f"  RF attack (conf ≥ 0.70)      → ATTACK  (RF)")
+    log.info(f"  RF attack (conf < 0.70) + AE → ATTACK  (RF+AE)")
+    log.info(f"  RF attack (conf < 0.70) only → SUSPECT (RF)")
+    log.info(f"  RF benign + AE flags         → ANOMALY (AE)")
+    log.info(f"  RF benign + AE passes        → BENIGN  (RF+AE)")
     log.info(f"  AE_THRESHOLD = {AE_THRESHOLD}")
+    log.info(f"  RF_CONF_HIGH = {RF_CONF_HIGH}")
 
     log.info("\n" + "=" * 55)
     log.info("Smoke test PASSED ✓")
