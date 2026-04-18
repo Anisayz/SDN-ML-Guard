@@ -26,22 +26,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+ 
 import time
 from typing import Any
-
+from src.config import Config
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-MITIGATION_URL  = os.getenv("MITIGATION_URL",  "http://localhost:9000/alert")
-ALERT_TIMEOUT_S = float(os.getenv("ALERT_TIMEOUT_S", "2.0"))
-ALERT_RETRIES   = int(os.getenv("ALERT_RETRIES",   "2"))
 
 # ---------------------------------------------------------------------------
 # HTTP session with retry logic
@@ -163,11 +156,15 @@ def send_alert(
     t0 = time.perf_counter()
     try:
         response = session.post(
-            MITIGATION_URL,
-            json    = payload,
-            timeout = ALERT_TIMEOUT_S,
-            headers = {"Content-Type": "application/json"},
+            Config.MITIGATION_URL,
+            json=payload,
+            timeout=Config.ALERT_TIMEOUT_S,
+            headers={
+                "Content-Type": "application/json",
+                "X-API-Key": Config.MITIGATIN_API_KEY,    
+            },
         )
+         
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         if response.ok:

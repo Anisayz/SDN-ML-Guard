@@ -44,7 +44,7 @@ class Config:
     MITIGATION_URL  : str   = os.getenv("MITIGATION_URL",  "http://localhost:9000/alert")
     ALERT_TIMEOUT_S : float = float(os.getenv("ALERT_TIMEOUT_S", "2.0"))
     ALERT_RETRIES   : int   = int(os.getenv("ALERT_RETRIES",     "2"))
-
+    MITIGATIN_API_KEY : str   = os.getenv("MITIGATIN_API_KEY", "mitigatin-engine-2026")  
     # ------------------------------------------------------------------
     # Inference thresholds
     # ------------------------------------------------------------------

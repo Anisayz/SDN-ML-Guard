@@ -108,7 +108,6 @@ class MLEngine:
         self.le            = None   # LabelEncoder
         self.feature_list: list[str] = []
         self.benign_class_id: int    = -1
-
     def load(self) -> None:
         """Load all artefacts from disk. Call once at startup."""
         if self._loaded:
@@ -116,11 +115,15 @@ class MLEngine:
 
         log.info("MLEngine: loading artefacts ...")
 
-        self.clf        = self._load_pkl(MODELS_DIR / "classifier.pkl",            "RandomForest")
-        self.ae_wrapper = self._load_pkl(MODELS_DIR / "anomaly.pkl",               "AutoencoderWrapper")
-        self.scaler        = self._load_pkl(MODELS_DIR /"scaler.pkl",        "scaler")
-        self.benign_scaler = self._load_pkl(MODELS_DIR /"benign_scaler.pkl", "benign_scaler")
-        self.le            = self._load_pkl(MODELS_DIR / "label_encoder.pkl", "LabelEncoder")
+        self.clf = self._load_pkl(MODELS_DIR / "classifier.pkl", "RandomForest")
+        self.ae_wrapper = self._load_pkl(MODELS_DIR / "anomaly.pkl", "AutoencoderWrapper")
+        self.scaler = self._load_pkl(MODELS_DIR / "scaler.pkl", "scaler")
+        self.benign_scaler = self._load_pkl(MODELS_DIR / "benign_scaler.pkl", "benign_scaler")
+        self.le = self._load_pkl(MODELS_DIR / "label_encoder.pkl", "LabelEncoder")
+
+         
+        self.scaler.set_output(transform="pandas")
+        self.benign_scaler.set_output(transform="pandas")
 
         self.benign_class_id = list(self.le.classes_).index(BENIGN_LABEL)
 
@@ -133,7 +136,6 @@ class MLEngine:
             f"AE_THRESHOLD={AE_THRESHOLD}"
         )
         self._loaded = True
-
     # ------------------------------------------------------------------
     # Core inference — single flow
     # ------------------------------------------------------------------
@@ -156,7 +158,12 @@ class MLEngine:
         if DEBUG:
             print("[DEBUG] BEFORE RF scaler:", type(raw_vector))
         # 2. RF inference
-        rf_vector                          = self.scaler.transform(raw_vector)
+        rf_array = self.scaler.transform(raw_vector)
+
+        rf_vector = pd.DataFrame(
+            rf_array,
+            columns=self.feature_list
+        )
         if DEBUG:
             print("[DEBUG] AFTER RF scaler:", type(rf_vector))
         rf_label, rf_confidence, rf_proba  = self._run_classifier(rf_vector)
@@ -166,7 +173,12 @@ class MLEngine:
         if DEBUG:
             print("[DEBUG] BEFORE AE scaler:", type(raw_vector))
  
-        ae_vector       = self.benign_scaler.transform(raw_vector)
+        ae_array = self.benign_scaler.transform(raw_vector)
+
+        ae_vector = pd.DataFrame(
+            ae_array,
+            columns=self.feature_list
+        )
         neg_score       = float(self.ae_wrapper.score_samples(ae_vector)[0])
         anomaly_score   = -neg_score                      # positive reconstruction error
         anomaly_flagged = anomaly_score > AE_THRESHOLD
@@ -206,12 +218,14 @@ class MLEngine:
             print("[DEBUG] BATCH shape:", raw_matrix.shape) # (n, 72)
 
         # RF — full batch
-        rf_matrix  = self.scaler.transform(raw_matrix)
+        rf_array = self.scaler.transform(raw_matrix)
+        rf_matrix = pd.DataFrame(rf_array, columns=self.feature_list)
         y_pred     = self.clf.predict(rf_matrix)
         y_proba    = self.clf.predict_proba(rf_matrix)                   # (n, n_classes)
 
         # AE — full batch
-        ae_matrix    = self.benign_scaler.transform(raw_matrix)
+        ae_array = self.benign_scaler.transform(raw_matrix)
+        ae_matrix = pd.DataFrame(ae_array, columns=self.feature_list)
         neg_scores   = self.ae_wrapper.score_samples(ae_matrix)          # (n,)
         ae_errors    = -neg_scores                                        # positive errors
         ae_flagged   = ae_errors > AE_THRESHOLD
