@@ -4,14 +4,6 @@ feature_extractor.py — nfstream flow → ML feature dict
 Converts a completed nfstream NFlow object into the exact 72-feature dict
 that predict.py expects, matching the CIC-IDS2018 / CICFlowMeter column names
 stored in feature_list.json.
-
-nfstream computes CICFlowMeter-compatible statistics natively — we just need
-to map nfstream attribute names to the exact column names used during training.
-
-Usage (called by capture.py):
-    from feature_extractor import flow_to_features
-    features = flow_to_features(flow)   # flow is an nfstream NFlow object
-    verdict  = engine.predict(features)
 """
 
 from __future__ import annotations
@@ -19,24 +11,7 @@ import math
 from typing import Any
 
 
-# ---------------------------------------------------------------------------
-# nfstream attribute → CICFlowMeter column name mapping
-# ---------------------------------------------------------------------------
-# Each entry: "cic_column_name": "nfstream_attribute_name"
-# If the attribute doesn't exist on the NFlow object, the feature defaults to 0.
-#
-# Reference:
-#   nfstream docs:     https://www.nfstream.org/docs/api
-#   CICFlowMeter cols: data/feature_list.json (72 features after preprocessing)
-#
-# to ask: if nfstream version changes or attribute names differ,
-# update the right-hand side values here. The left-hand side (CIC names)
-# must never change — they're locked to the trained model.
-
 NFSTREAM_TO_CIC: dict[str, str] = {
-    # --- Basic flow identifiers (kept for alert.py, not fed to ML model) ---
-    # These are extracted separately in flow_to_meta(), not in flow_to_features()
-
     # --- Packet / byte counts ---
     "Tot Fwd Pkts"       : "src2dst_packets",
     "Tot Bwd Pkts"       : "dst2src_packets",
@@ -55,10 +30,6 @@ NFSTREAM_TO_CIC: dict[str, str] = {
     "Bwd Pkt Len Mean"   : "dst2src_mean_ps",
     "Bwd Pkt Len Std"    : "dst2src_stddev_ps",
 
-    # --- Flow-level rates ---
-    "Flow Byts/s"        : "bidirectional_bytes",   # computed below, not direct
-    "Flow Pkts/s"        : "bidirectional_packets",  # computed below, not direct
-
     # --- Inter-arrival times (flow level) ---
     "Flow IAT Mean"      : "bidirectional_mean_iat",
     "Flow IAT Std"       : "bidirectional_stddev_iat",
@@ -66,14 +37,14 @@ NFSTREAM_TO_CIC: dict[str, str] = {
     "Flow IAT Min"       : "bidirectional_min_iat",
 
     # --- Inter-arrival times (forward) ---
-    "Fwd IAT Tot"        : "src2dst_duration",       # proxy — see note below
+    "Fwd IAT Tot"        : "src2dst_duration",
     "Fwd IAT Mean"       : "src2dst_mean_iat",
     "Fwd IAT Std"        : "src2dst_stddev_iat",
     "Fwd IAT Max"        : "src2dst_max_iat",
     "Fwd IAT Min"        : "src2dst_min_iat",
 
     # --- Inter-arrival times (backward) ---
-    "Bwd IAT Tot"        : "dst2src_duration",       # proxy
+    "Bwd IAT Tot"        : "dst2src_duration",
     "Bwd IAT Mean"       : "dst2src_mean_iat",
     "Bwd IAT Std"        : "dst2src_stddev_iat",
     "Bwd IAT Max"        : "dst2src_max_iat",
@@ -91,16 +62,11 @@ NFSTREAM_TO_CIC: dict[str, str] = {
     "Fwd Header Len"     : "src2dst_header_bytes",
     "Bwd Header Len"     : "dst2src_header_bytes",
 
-    # --- Packet rates (directional) ---
-    "Fwd Pkts/s"         : "src2dst_packets",        # computed below
-    "Bwd Pkts/s"         : "dst2src_packets",        # computed below
-
     # --- Packet length (combined) ---
     "Pkt Len Min"        : "bidirectional_min_ps",
     "Pkt Len Max"        : "bidirectional_max_ps",
     "Pkt Len Mean"       : "bidirectional_mean_ps",
     "Pkt Len Std"        : "bidirectional_stddev_ps",
-    "Pkt Len Var"        : "bidirectional_stddev_ps", # squared below
 
     # --- TCP flag counts (bidirectional) ---
     "FIN Flag Cnt"       : "bidirectional_fin_packets",
@@ -112,15 +78,12 @@ NFSTREAM_TO_CIC: dict[str, str] = {
     "CWE Flag Count"     : "bidirectional_cwr_packets",
     "ECE Flag Cnt"       : "bidirectional_ece_packets",
 
-    # --- Ratios ---
-    "Down/Up Ratio"      : "dst2src_packets",        # computed below
-
     # --- Segment size averages ---
     "Pkt Size Avg"       : "bidirectional_mean_ps",
     "Fwd Seg Size Avg"   : "src2dst_mean_ps",
     "Bwd Seg Size Avg"   : "dst2src_mean_ps",
 
-    # --- Subflow (nfstream = same as full flow for single subflow) ---
+    # --- Subflow ---
     "Subflow Fwd Pkts"   : "src2dst_packets",
     "Subflow Fwd Byts"   : "src2dst_bytes",
     "Subflow Bwd Pkts"   : "dst2src_packets",
@@ -141,36 +104,20 @@ NFSTREAM_TO_CIC: dict[str, str] = {
     "Idle Min"           : "idle_min",
 }
 
-# Features that need special computation (not a direct attribute lookup)
-# handled explicitly in flow_to_features()
 COMPUTED_FEATURES = {
-    "Dst Port",
-    "Protocol",
-    "Flow Duration",
-    "Flow Byts/s",
-    "Flow Pkts/s",
-    "Fwd Pkts/s",
-    "Bwd Pkts/s",
-    "Down/Up Ratio",
-    "Pkt Len Var",
-    "Fwd Act Data Pkts",
-    "Fwd Seg Size Min",
+    "Dst Port", "Protocol", "Flow Duration",
+    "Flow Byts/s", "Flow Pkts/s", "Fwd Pkts/s", "Bwd Pkts/s",
+    "Down/Up Ratio", "Pkt Len Var", "Fwd Act Data Pkts", "Fwd Seg Size Min",
 }
 
 
 def _safe(flow: Any, attr: str, default: float = 0.0) -> float:
-    """
-    Safely read a float attribute from an nfstream NFlow.
-    Returns default if attribute is missing, None, NaN, or Inf.
-    """
     val = getattr(flow, attr, default)
     if val is None:
         return default
     try:
         f = float(val)
-        if math.isnan(f) or math.isinf(f):
-            return default
-        return f
+        return default if (math.isnan(f) or math.isinf(f)) else f
     except (TypeError, ValueError):
         return default
 
@@ -179,79 +126,40 @@ def flow_to_features(flow: Any) -> dict[str, float]:
     """
     Convert a completed nfstream NFlow object to the 72-feature dict
     expected by predict.py.
-
-    Args:
-        flow: nfstream NFlow object (from NFStreamer callback or iteration)
-
-    Returns:
-        dict mapping CICFlowMeter column name → float value
-        Missing or invalid values default to 0.0.
     """
     features: dict[str, float] = {}
 
-    # ------------------------------------------------------------------
     # 1. Direct attribute mappings
-    # ------------------------------------------------------------------
     for cic_name, nf_attr in NFSTREAM_TO_CIC.items():
         if cic_name not in COMPUTED_FEATURES:
             features[cic_name] = _safe(flow, nf_attr)
 
-    # ------------------------------------------------------------------
     # 2. Computed features
-    # ------------------------------------------------------------------
-
-    # Destination port and protocol
     features["Dst Port"] = _safe(flow, "dst_port")
     features["Protocol"] = _safe(flow, "protocol")
 
-    # Flow duration in microseconds (nfstream gives milliseconds)
-    # CICFlowMeter uses microseconds
+    # Flow duration: nfstream gives ms, CICFlowMeter uses µs
     duration_ms = _safe(flow, "bidirectional_duration_ms")
-    duration_us = duration_ms * 1000.0
-    features["Flow Duration"] = duration_us
+    features["Flow Duration"] = duration_ms * 1000.0
 
-    # Flow Bytes/s and Packets/s
-    # Guard against zero-duration flows (would give Inf)
     duration_s = duration_ms / 1000.0
     if duration_s > 0:
-        total_bytes   = _safe(flow, "bidirectional_bytes")
-        total_packets = _safe(flow, "bidirectional_packets")
-        fwd_packets   = _safe(flow, "src2dst_packets")
-        bwd_packets   = _safe(flow, "dst2src_packets")
-
-        features["Flow Byts/s"] = total_bytes   / duration_s
-        features["Flow Pkts/s"] = total_packets / duration_s
-        features["Fwd Pkts/s"]  = fwd_packets   / duration_s
-        features["Bwd Pkts/s"]  = bwd_packets   / duration_s
+        features["Flow Byts/s"] = _safe(flow, "bidirectional_bytes")   / duration_s
+        features["Flow Pkts/s"] = _safe(flow, "bidirectional_packets") / duration_s
+        features["Fwd Pkts/s"]  = _safe(flow, "src2dst_packets")       / duration_s
+        features["Bwd Pkts/s"]  = _safe(flow, "dst2src_packets")       / duration_s
     else:
-        features["Flow Byts/s"] = 0.0
-        features["Flow Pkts/s"] = 0.0
-        features["Fwd Pkts/s"]  = 0.0
-        features["Bwd Pkts/s"]  = 0.0
+        features["Flow Byts/s"] = features["Flow Pkts/s"] = 0.0
+        features["Fwd Pkts/s"]  = features["Bwd Pkts/s"]  = 0.0
 
-    # Down/Up ratio = bwd_packets / fwd_packets
-    fwd_pkts = _safe(flow, "src2dst_packets")
-    bwd_pkts = _safe(flow, "dst2src_packets")
-    features["Down/Up Ratio"] = (bwd_pkts / fwd_pkts) if fwd_pkts > 0 else 0.0
-
-    # Packet length variance = stddev²
-    stddev = _safe(flow, "bidirectional_stddev_ps")
-    features["Pkt Len Var"] = stddev ** 2
-
-    # Fwd Act Data Pkts — packets carrying actual data (non-zero payload)
-    # nfstream doesn't expose this directly; use fwd packets as proxy
-    # NOTE: if nfstream adds this attribute, replace with:
-    # features["Fwd Act Data Pkts"] = _safe(flow, "src2dst_data_packets")
-    features["Fwd Act Data Pkts"] = _safe(flow, "src2dst_packets")
-
-    # Fwd Seg Size Min — minimum segment size in forward direction
-    # nfstream doesn't expose this directly; use min packet size as proxy
-    # NOTE: replace with actual attribute if available in your nfstream version
+    fwd = _safe(flow, "src2dst_packets")
+    bwd = _safe(flow, "dst2src_packets")
+    features["Down/Up Ratio"]    = (bwd / fwd) if fwd > 0 else 0.0
+    features["Pkt Len Var"]      = _safe(flow, "bidirectional_stddev_ps") ** 2
+    features["Fwd Act Data Pkts"]= _safe(flow, "src2dst_packets")
     features["Fwd Seg Size Min"] = _safe(flow, "src2dst_min_ps")
 
-    # ------------------------------------------------------------------
-    # 3. Final safety pass — replace any remaining NaN/Inf with 0
-    # ------------------------------------------------------------------
+    # 3. Final safety pass
     for k, v in features.items():
         if math.isnan(v) or math.isinf(v):
             features[k] = 0.0
@@ -261,21 +169,35 @@ def flow_to_features(flow: Any) -> dict[str, float]:
 
 def flow_to_meta(flow: Any) -> dict[str, Any]:
     """
-    Extract flow identity fields (not ML features) needed by alert.py
-    to tell the Mitigation Engine which specific flow to block.
+    Extract flow identity + heuristic fields needed by predict.py.
 
-    These fields are NOT passed to the ML model — they were dropped
-    during preprocessing (IDENTITY_COLS in preprocess.py).
-
-    Returns:
-        dict with src/dst IP, ports, protocol, timestamps
+    The three heuristic fields at the bottom are consumed by
+    MLEngine._is_syn_flood() — they MUST be present for SYN flood
+    detection to work at runtime.
     """
+    # nfstream >= 0.9.7 exposes per-direction TCP flag counts.
+    # Try both known attribute name variants defensively.
+    src_syn = getattr(flow, "src2dst_syn_packets", None)
+    if src_syn is None:
+        src_syn = getattr(flow, "bidirectional_syn_packets", None)
+    if src_syn is None:
+        src_syn = 0
+
     return {
-        "src_ip"       : getattr(flow, "src_ip",   ""),
-        "dst_ip"       : getattr(flow, "dst_ip",   ""),
+        # --- Identity (not fed to ML model) ---
+        "src_ip"       : getattr(flow, "src_ip",  ""),
+        "dst_ip"       : getattr(flow, "dst_ip",  ""),
         "src_port"     : int(_safe(flow, "src_port")),
         "dst_port"     : int(_safe(flow, "dst_port")),
         "protocol"     : int(_safe(flow, "protocol")),
         "start_time_ms": int(_safe(flow, "bidirectional_first_seen_ms")),
         "end_time_ms"  : int(_safe(flow, "bidirectional_last_seen_ms")),
+
+        # --- Heuristic fields (consumed by MLEngine._is_syn_flood) ---
+        # src_syn_packets:           how many SYNs sent in forward direction
+        # dst2src_bytes:             bytes received back from target
+        # bidirectional_duration_ms: total flow duration
+        "src_syn_packets"          : int(src_syn),
+        "dst2src_bytes"            : int(_safe(flow, "dst2src_bytes")),
+        "bidirectional_duration_ms": float(_safe(flow, "bidirectional_duration_ms")),
     }
